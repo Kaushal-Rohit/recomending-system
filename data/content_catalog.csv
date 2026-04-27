@@ -1,0 +1,51 @@
+item_id,title,content_type,genre,tags,creator,platform,language,duration_sec
+item_001,TechCrunch: Technology Deep Dive #1,article,"technology,ai","educational,classic,beginner",TechCrunch,reddit,en,0
+item_002,Kurzgesagt — Gaming Video 2,video,"gaming,action","short,trending,beginner",Kurzgesagt,youtube,en,2538
+item_003,Linus Tech Tips — Science Video 3,video,"science,education","trending,viral,classic",Linus Tech Tips,twitch,en,2585
+item_004,Nature Journal: Sports Deep Dive #4,article,"sports,analysis","long-form,recommended,educational",Nature Journal,medium,en,0
+item_005,Joe Rogan — Episode 5,podcast,"true-crime,stories","entertaining,educational,new",Joe Rogan,google_podcasts,en,4662
+item_006,Veritasium — Sports Video 6,video,"sports,fitness","popular,entertaining,beginner",Veritasium,youtube,en,1676
+item_007,The Weeknd — Track 7,music,"classical,instrumental","viral,popular,short",The Weeknd,youtube,en,237
+item_008,CrashCourse — Comedy Video 8,video,"comedy,entertainment","classic,beginner,popular",CrashCourse,netflix,en,2484
+item_009,Khan Academy — Science Video 9,video,"science,education","popular,short,educational",Khan Academy,youtube,en,1073
+item_010,Arctic Monkeys — Track 10,music,"indie,alternative","entertaining,classic,top10",Arctic Monkeys,spotify,en,214
+item_011,CrashCourse — Gaming Video 11,video,"gaming,action","viral,beginner,classic",CrashCourse,twitch,en,820
+item_012,PewDiePie — News Video 12,video,"news,politics","beginner,viral,classic",PewDiePie,netflix,en,2741
+item_013,TechCrunch: Finance Deep Dive #13,article,"finance,investing","trending,entertaining,short",TechCrunch,medium,en,0
+item_014,Linus Tech Tips — Gaming Video 14,video,"gaming,action","entertaining,classic,top10",Linus Tech Tips,twitch,en,3060
+item_015,Drake — Track 15,music,"jazz,blues","new,classic,viral",Drake,spotify,en,187
+item_016,Bad Bunny — Track 16,music,"classical,instrumental","entertaining,classic,new",Bad Bunny,youtube,en,222
+item_017,Taylor Swift — Track 17,music,"jazz,blues","popular,new,top10",Taylor Swift,spotify,en,340
+item_018,CrashCourse — Travel Video 18,video,"travel,adventure","short,recommended,long-form",CrashCourse,youtube,en,1696
+item_019,The Weeknd — Track 19,music,"classical,instrumental","popular,top10,viral",The Weeknd,youtube,en,304
+item_020,TED Radio — Episode 20,podcast,"education,learning","short,new,long-form",TED Radio,spotify,en,3604
+item_021,Kurzgesagt — Comedy Video 21,video,"comedy,entertainment","popular,top10,educational",Kurzgesagt,youtube,en,2199
+item_022,Radiolab — Episode 22,podcast,"history,culture","entertaining,new,viral",Radiolab,spotify,en,2452
+item_023,Serial — Episode 23,podcast,"history,culture","long-form,trending,popular",Serial,google_podcasts,en,3855
+item_024,Linus Tech Tips — Comedy Video 24,video,"comedy,entertainment","recommended,popular,beginner",Linus Tech Tips,youtube,en,1106
+item_025,TechCrunch: Science Deep Dive #25,article,"science,research","advanced,new,beginner",TechCrunch,reddit,en,0
+item_026,ESPN: Science Deep Dive #26,article,"science,research","educational,viral,recommended",ESPN,medium,en,0
+item_027,Beethoven Orchestra — Track 27,music,"hip-hop,rap","short,top10,beginner",Beethoven Orchestra,youtube,en,199
+item_028,Kurzgesagt — News Video 28,video,"news,politics","classic,advanced,popular",Kurzgesagt,netflix,en,615
+item_029,CrashCourse — Tech Video 29,video,"tech,tutorial","recommended,classic,trending",CrashCourse,twitch,en,1062
+item_030,Linus Tech Tips — Tech Video 30,video,"tech,tutorial","entertaining,popular,viral",Linus Tech Tips,youtube,en,248
+item_031,Mark Rober — Comedy Video 31,video,"comedy,entertainment","new,beginner,recommended",Mark Rober,youtube,en,2328
+item_032,Beethoven Orchestra — Track 32,music,"jazz,blues","short,classic,popular",Beethoven Orchestra,apple_music,en,326
+item_033,Gordon Ramsay — Travel Video 33,video,"travel,adventure","long-form,beginner,trending",Gordon Ramsay,netflix,en,1803
+item_034,TechCrunch: Technology Deep Dive #34,article,"technology,ai","beginner,entertaining,popular",TechCrunch,substack,en,0
+item_035,Linus Tech Tips — Science Video 35,video,"science,education","new,short,advanced",Linus Tech Tips,twitch,en,1957
+item_036,Linus Tech Tips — News Video 36,video,"news,politics","advanced,viral,popular",Linus Tech Tips,youtube,en,1935
+item_037,Veritasium — Tech Video 37,video,"tech,tutorial","short,long-form,beginner",Veritasium,youtube,en,801
+item_038,TechWithTim — Travel Video 38,video,"travel,adventure","trending,short,educational",TechWithTim,youtube,en,1672
+item_039,TED Radio — Episode 39,podcast,"business,entrepreneurship","beginner,viral,top10",TED Radio,apple_podcasts,en,6906
+item_040,Harvard Health: Science Deep Dive #40,article,"science,research","educational,classic,trending",Harvard Health,medium,en,0
+item_041,The Weeknd — Track 41,music,"indie,alternative","trending,advanced,recommended",The Weeknd,youtube,en,200
+item_042,Kendrick Lamar — Track 42,music,"electronic,dance","popular,new,advanced",Kendrick Lamar,spotify,en,250
+item_043,Beethoven Orchestra — Track 43,music,"rock,pop","recommended,classic,advanced",Beethoven Orchestra,apple_music,en,150
+item_044,Taylor Swift — Track 44,music,"rock,pop","recommended,advanced,viral",Taylor Swift,apple_music,en,288
+item_045,Linus Tech Tips — Comedy Video 45,video,"comedy,entertainment","entertaining,classic,educational",Linus Tech Tips,twitch,en,3053
+item_046,Daft Punk — Track 46,music,"hip-hop,rap","advanced,popular,trending",Daft Punk,apple_music,en,200
+item_047,Taylor Swift — Track 47,music,"electronic,dance","classic,viral,educational",Taylor Swift,spotify,en,257
+item_048,Veritasium — Sports Video 48,video,"sports,fitness","educational,new,long-form",Veritasium,youtube,en,1633
+item_049,TED Radio — Episode 49,podcast,"history,culture","viral,trending,top10",TED Radio,google_podcasts,en,6557
+item_050,TED Radio — Episode 50,podcast,"history,culture","new,educational,popular",TED Radio,google_podcasts,en,2048
