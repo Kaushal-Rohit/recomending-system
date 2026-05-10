@@ -27,12 +27,12 @@ class HybridRecommendationSystem:
     - Robustness (ensemble reduces individual model errors)
     """
 
-    def __init__(self):
+    def __init__(self, data_dir: str = '.'):
         self.cf_model = CollaborativeFilteringModel(n_factors=50)
         self.cb_model = ContentBasedModel()
         self.ub_model = UserBehaviorModel()
 
-        self.preprocessor = DataPreprocessor()
+        self.preprocessor = DataPreprocessor(data_dir=data_dir)
         self.unique_movies = None
         self.movie_features = None
         self.tags_list = None
@@ -45,7 +45,7 @@ class HybridRecommendationSystem:
 
         logger.info("HybridRecommendationSystem initialized")
 
-    def train(self, data_dir: str = '.'):
+    def train(self, data_dir: str = None):
         """Complete training pipeline"""
         try:
             logger.info("=" * 60)
@@ -54,7 +54,8 @@ class HybridRecommendationSystem:
 
             # Step 1: Load and preprocess data
             logger.info("\n[Step 1] Loading and preprocessing data...")
-            self.preprocessor = DataPreprocessor(data_dir=data_dir)
+            if data_dir is not None:
+                self.preprocessor.data_dir = data_dir
             self.preprocessor.load_data()
             self.merged_data = self.preprocessor.merge_data()
 
