@@ -7,22 +7,20 @@ This module implements a sophisticated recommendation engine that combines:
 4. User Behavior Learning
 """
 
-import pandas as pd
-import numpy as np
-import pickle
-import warnings
-from typing import List, Tuple, Dict
-from sklearn.preprocessing import MinMaxScaler, StandardScaler, MultiLabelBinarizer
-from sklearn.decomposition import TruncatedSVD
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.neural_network import MLPRegressor
-from sklearn.regularization import l1_l2_penalty
-import xgboost as xgb
-from scipy.sparse import csr_matrix, vstack
-from datetime import datetime
 import logging
+import pickle
+import re
+import warnings
+from typing import Dict, List, Tuple
+
+import numpy as np
+import pandas as pd
+from scipy.sparse import csr_matrix, hstack
+from sklearn.decomposition import TruncatedSVD
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler, MultiLabelBinarizer, StandardScaler, normalize
 
 warnings.filterwarnings('ignore')
 
@@ -55,14 +53,26 @@ class DataPreprocessor:
         self.tags = None
         self.ratings = None
         self.genome_scores = None
+        self.movie_metadata = None
         self.merged_data = None
+        self.tag_vectorizer = None
+        self.genre_binarizer = None
+        self.genome_svd = None
         logger.info("DataPreprocessor initialized")
+
+    @staticmethod
+    def _extract_release_year(title: str) -> float:
+        if not isinstance(title, str):
+            return np.nan
+        match = re.search(r'\((\d{4})\)\s*$', title)
+        return float(match.group(1)) if match else np.nan
     
     def load_data(self):
         """Load all CSV files"""
         try:
             logger.info("Loading movies data...")
             self.movies = pd.read_csv(f'{self.data_dir}/movies.csv')
+            self.movies['release_year'] = self.movies['title'].apply(self._extract_release_year)
             
             logger.info("Loading tags data...")
             self.tags = pd.read_csv(f'{self.data_dir}/tags.csv')
@@ -90,34 +100,49 @@ class DataPreprocessor:
             logger.info("Starting data merge process...")
             
             # Merge movies with tags
-            movie_tags = self.tags.groupby('movieId')['tag'].apply(list).reset_index()
+            movie_tags = (
+                self.tags.dropna(subset=['tag'])
+                .groupby('movieId')['tag']
+                .apply(lambda tags: sorted(set(tags.astype(str))))
+                .reset_index()
+            )
             movie_tags.columns = ['movieId', 'tag_list']
+            movie_tags['tag_text'] = movie_tags['tag_list'].apply(lambda tags: ' '.join(tags))
             
             movies_with_tags = self.movies.merge(movie_tags, on='movieId', how='left')
-            movies_with_tags['tag_list'] = movies_with_tags['tag_list'].fillna('').apply(
-                lambda x: [] if x == '' else x
+            movies_with_tags['tag_list'] = movies_with_tags['tag_list'].apply(
+                lambda tags: tags if isinstance(tags, list) else []
             )
+            movies_with_tags['tag_text'] = movies_with_tags['tag_text'].fillna('')
             
-            # Merge with ratings
-            merged = self.ratings.merge(
-                movies_with_tags,
+            # Merge with genome scores
+            genome_avg = self.genome_scores.groupby('movieId')['relevance'].mean().reset_index()
+            genome_avg.columns = ['movieId', 'avg_relevance_score']
+            
+            self.movie_metadata = movies_with_tags.merge(
+                genome_avg,
                 on='movieId',
                 how='left'
             )
             
-            # Merge with genome scores
-            genome_avg = self.genome_scores.groupby('movieId')['relevanceScore'].mean().reset_index()
-            genome_avg.columns = ['movieId', 'avg_relevance_score']
+            self.movie_metadata['avg_relevance_score'] = self.movie_metadata['avg_relevance_score'].fillna(0.5)
+            self.movie_metadata['release_year'] = self.movie_metadata['release_year'].fillna(
+                self.movie_metadata['release_year'].median()
+            )
             
-            self.merged_data = merged.merge(
-                genome_avg,
+            # Merge with ratings
+            self.merged_data = self.ratings.merge(
+                self.movie_metadata,
                 on='movieId',
                 how='left'
             )
             
             # Fill missing values
             self.merged_data['avg_relevance_score'] = self.merged_data['avg_relevance_score'].fillna(0.5)
-            self.merged_data['tag_list'] = self.merged_data['tag_list'].fillna('')
+            self.merged_data['tag_list'] = self.merged_data['tag_list'].apply(
+                lambda tags: tags if isinstance(tags, list) else []
+            )
+            self.merged_data['tag_text'] = self.merged_data['tag_text'].fillna('')
             
             logger.info(f"Merged dataset shape: {self.merged_data.shape}")
             logger.info(f"Columns: {self.merged_data.columns.tolist()}")
@@ -135,46 +160,90 @@ class DataPreprocessor:
         """
         try:
             logger.info("Creating movie feature matrix...")
+            if self.movie_metadata is None:
+                logger.error("Movie metadata not available for feature creation")
+                return None, None, None
             
-            # Get unique movies
-            unique_movies = self.merged_data[['movieId', 'title', 'genres', 'tag_list', 'avg_relevance_score']].drop_duplicates()
+            # Get unique movies with metadata
+            unique_movies = self.movie_metadata[[
+                'movieId', 'title', 'genres', 'tag_list', 'tag_text',
+                'avg_relevance_score', 'release_year'
+            ]].drop_duplicates()
             
-            # Extract all unique tags
-            all_tags = set()
-            for tags_list in unique_movies['tag_list']:
-                if isinstance(tags_list, list):
-                    all_tags.update(tags_list)
+            unique_movies['genre_list'] = unique_movies['genres'].fillna('').apply(
+                lambda genres: genres.split('|') if genres else []
+            )
+            unique_movies['tag_text'] = unique_movies['tag_text'].fillna('')
             
-            logger.info(f"Total unique tags: {len(all_tags)}")
+            # Tag TF-IDF embeddings
+            tag_corpus = unique_movies['tag_text']
+            if tag_corpus.str.len().sum() == 0:
+                tag_features = csr_matrix((len(unique_movies), 0))
+                self.tag_vectorizer = None
+                tags_list = []
+            else:
+                self.tag_vectorizer = TfidfVectorizer(min_df=2, max_features=5000)
+                tag_features = self.tag_vectorizer.fit_transform(tag_corpus)
+                tags_list = self.tag_vectorizer.get_feature_names_out().tolist()
             
-            # Create tag feature matrix
-            movie_tag_features = []
-            for idx, row in unique_movies.iterrows():
-                tag_vector = np.zeros(len(all_tags))
-                tags_list = row['tag_list']
-                if isinstance(tags_list, list):
-                    for tag in tags_list:
-                        if tag in all_tags:
-                            tag_vector[list(all_tags).index(tag)] = 1
-                movie_tag_features.append(tag_vector)
+            # Genre multi-hot features
+            self.genre_binarizer = MultiLabelBinarizer(sparse_output=True)
+            genre_features = self.genre_binarizer.fit_transform(unique_movies['genre_list'])
             
-            movie_tag_features = np.array(movie_tag_features)
+            # Genome relevance embeddings (SVD on sparse relevance matrix)
+            genome_embeddings = None
+            if self.genome_scores is not None and not self.genome_scores.empty:
+                movie_id_to_index = {
+                    movie_id: idx for idx, movie_id in enumerate(unique_movies['movieId'].tolist())
+                }
+                movie_indices = self.genome_scores['movieId'].map(movie_id_to_index)
+                valid_mask = movie_indices.notna()
+                
+                if valid_mask.any():
+                    tag_id_to_index = {
+                        tag_id: idx for idx, tag_id in enumerate(self.genome_scores['tagId'].unique())
+                    }
+                    rows = movie_indices[valid_mask].astype(int).to_numpy()
+                    cols = self.genome_scores.loc[valid_mask, 'tagId'].map(tag_id_to_index).astype(int).to_numpy()
+                    data = self.genome_scores.loc[valid_mask, 'relevance'].astype(float).to_numpy()
+                    
+                    genome_matrix = csr_matrix(
+                        (data, (rows, cols)),
+                        shape=(len(unique_movies), len(tag_id_to_index))
+                    )
+                    
+                    if genome_matrix.shape[1] >= 2:
+                        n_components = min(64, genome_matrix.shape[1] - 1)
+                        self.genome_svd = TruncatedSVD(
+                            n_components=n_components,
+                            random_state=42
+                        )
+                        genome_embeddings = self.genome_svd.fit_transform(genome_matrix)
             
-            # Normalize relevance scores
+            # Numeric features
             scaler = MinMaxScaler()
             relevance_scores = scaler.fit_transform(
                 unique_movies['avg_relevance_score'].values.reshape(-1, 1)
             )
+            release_year_scaled = scaler.fit_transform(
+                unique_movies['release_year'].values.reshape(-1, 1)
+            )
             
-            # Combine features (tags + normalized relevance score)
-            combined_features = np.hstack([
-                movie_tag_features,
-                relevance_scores * 2  # Weight relevance score
-            ])
+            feature_blocks = [
+                tag_features,
+                genre_features,
+                csr_matrix(release_year_scaled),
+                csr_matrix(relevance_scores)
+            ]
+            if genome_embeddings is not None:
+                feature_blocks.append(csr_matrix(genome_embeddings))
+            
+            combined_features = hstack(feature_blocks, format='csr')
+            combined_features = normalize(combined_features, norm='l2')
             
             logger.info(f"Movie feature matrix shape: {combined_features.shape}")
             
-            return unique_movies, combined_features, list(all_tags)
+            return unique_movies, combined_features, tags_list
         
         except Exception as e:
             logger.error(f"Error creating movie features: {str(e)}")
@@ -203,22 +272,27 @@ class CollaborativeFilteringModel:
         self.user_factors = None
         self.item_factors = None
         self.movie_ids = None
+        self.user_ids = None
+        self.user_id_to_index = {}
+        self.movie_id_to_index = {}
         logger.info(f"CollaborativeFilteringModel initialized with {n_factors} factors")
     
     def create_interaction_matrix(self, ratings_df):
         """Create user-item interaction matrix from ratings"""
         try:
             logger.info("Creating interaction matrix...")
-            
             self.movie_ids = sorted(ratings_df['movieId'].unique())
-            user_ids = sorted(ratings_df['userId'].unique())
+            self.user_ids = sorted(ratings_df['userId'].unique())
+            self.user_id_to_index = {user_id: idx for idx, user_id in enumerate(self.user_ids)}
+            self.movie_id_to_index = {movie_id: idx for idx, movie_id in enumerate(self.movie_ids)}
             
-            # Create pivot table
-            interaction_matrix = ratings_df.pivot_table(
-                index='userId',
-                columns='movieId',
-                values='rating',
-                fill_value=0
+            rows = ratings_df['userId'].map(self.user_id_to_index).to_numpy()
+            cols = ratings_df['movieId'].map(self.movie_id_to_index).to_numpy()
+            data = ratings_df['rating'].astype(float).to_numpy()
+            
+            interaction_matrix = csr_matrix(
+                (data, (rows, cols)),
+                shape=(len(self.user_ids), len(self.movie_ids))
             )
             
             logger.info(f"Interaction matrix shape: {interaction_matrix.shape}")
@@ -255,17 +329,17 @@ class CollaborativeFilteringModel:
     def predict_score(self, user_id: int, movie_id: int) -> float:
         """Predict rating for user-movie pair"""
         try:
-            if movie_id not in self.movie_ids:
+            if movie_id not in self.movie_id_to_index:
                 return 0
-            
-            movie_idx = self.movie_ids.index(movie_id)
-            
+
+            movie_idx = self.movie_id_to_index[movie_id]
+
             # Find user factor (handle new users)
-            if user_id <= len(self.user_factors):
-                user_factor = self.user_factors[user_id - 1]
+            if user_id in self.user_id_to_index:
+                user_factor = self.user_factors[self.user_id_to_index[user_id]]
             else:
                 user_factor = np.zeros(self.n_factors)
-            
+
             # Compute dot product
             score = np.dot(user_factor, self.item_factors[movie_idx])
             return float(np.clip(score, 0, 5))
@@ -273,6 +347,28 @@ class CollaborativeFilteringModel:
         except Exception as e:
             logger.error(f"Error in predict_score: {str(e)}")
             return 0
+
+    def predict_scores_for_user(self, user_id: int, movie_ids: List[int]) -> np.ndarray:
+        """Predict ratings for a user across a list of movie IDs"""
+        try:
+            if user_id not in self.user_id_to_index:
+                return np.zeros(len(movie_ids))
+
+            user_idx = self.user_id_to_index[user_id]
+            user_factor = self.user_factors[user_idx]
+            all_scores = user_factor @ self.item_factors.T
+
+            scores = np.zeros(len(movie_ids))
+            for idx, movie_id in enumerate(movie_ids):
+                movie_idx = self.movie_id_to_index.get(movie_id)
+                if movie_idx is not None:
+                    scores[idx] = all_scores[movie_idx]
+
+            return np.clip(scores, 0, 5)
+
+        except Exception as e:
+            logger.error(f"Error predicting scores for user: {str(e)}")
+            return np.zeros(len(movie_ids))
 
 
 class ContentBasedModel:
@@ -289,7 +385,7 @@ class ContentBasedModel:
     def __init__(self):
         self.movie_features = None
         self.movie_ids = None
-        self.similarity_matrix = None
+        self.movie_id_to_index = {}
         logger.info("ContentBasedModel initialized")
     
     def fit(self, movie_ids, movie_features):
@@ -304,14 +400,14 @@ class ContentBasedModel:
             logger.info("Fitting ContentBased model...")
             
             self.movie_ids = movie_ids.tolist()
-            self.movie_features = movie_features
+            self.movie_id_to_index = {movie_id: idx for idx, movie_id in enumerate(self.movie_ids)}
+            if hasattr(movie_features, "tocsr"):
+                self.movie_features = movie_features.tocsr()
+            else:
+                self.movie_features = csr_matrix(movie_features)
+            self.movie_features = normalize(self.movie_features, norm='l2')
             
-            # Compute cosine similarity matrix
-            self.similarity_matrix = cosine_similarity(movie_features)
-            
-            logger.info(f"Similarity matrix shape: {self.similarity_matrix.shape}")
-            logger.info(f"Similarity stats - Mean: {self.similarity_matrix.mean():.4f}, "
-                       f"Max: {self.similarity_matrix.max():.4f}, Min: {self.similarity_matrix.min():.4f}")
+            logger.info(f"Movie feature matrix shape: {self.movie_features.shape}")
             
             return True
         
@@ -322,25 +418,64 @@ class ContentBasedModel:
     def find_similar_movies(self, movie_id: int, top_k: int = 10) -> List[Tuple[int, float]]:
         """Find top-k similar movies based on content features"""
         try:
-            if movie_id not in self.movie_ids:
+            if movie_id not in self.movie_id_to_index:
                 return []
             
-            movie_idx = self.movie_ids.index(movie_id)
-            similarities = self.similarity_matrix[movie_idx]
+            movie_idx = self.movie_id_to_index[movie_id]
+            query_vector = self.movie_features[movie_idx]
+            similarities = query_vector.dot(self.movie_features.T).toarray().ravel()
+            similarities[movie_idx] = -1
             
-            # Get top-k indices (excluding the movie itself)
-            top_indices = np.argsort(similarities)[::-1][1:top_k+1]
-            
-            results = [
-                (self.movie_ids[idx], float(similarities[idx]))
-                for idx in top_indices
-            ]
+            top_indices = np.argsort(similarities)[::-1][:top_k]
+            results = [(self.movie_ids[idx], float(similarities[idx])) for idx in top_indices]
             
             return results
         
         except Exception as e:
             logger.error(f"Error in find_similar_movies: {str(e)}")
             return []
+
+    def build_user_profile(self, movie_ids: List[int], ratings: List[float]):
+        """Build a weighted user profile vector from watched movies"""
+        try:
+            indices = []
+            weights = []
+            for movie_id, rating in zip(movie_ids, ratings):
+                movie_idx = self.movie_id_to_index.get(movie_id)
+                if movie_idx is not None:
+                    indices.append(movie_idx)
+                    weights.append(max(rating, 0.1))
+            
+            if not indices:
+                return None
+            
+            weights = np.array(weights, dtype=float)
+            weights = weights / weights.sum()
+            profile = self.movie_features[indices].multiply(weights[:, None]).sum(axis=0)
+            return profile
+        
+        except Exception as e:
+            logger.error(f"Error building user profile: {str(e)}")
+            return None
+
+    def score_candidates(self, profile_vector, candidate_movie_ids: List[int]) -> np.ndarray:
+        """Score candidate movies by cosine similarity to a profile vector"""
+        try:
+            if profile_vector is None:
+                return np.zeros(len(candidate_movie_ids))
+            
+            profile_vector = normalize(profile_vector, norm='l2')
+            similarities = profile_vector.dot(self.movie_features.T).toarray().ravel()
+            scores = np.zeros(len(candidate_movie_ids))
+            for idx, movie_id in enumerate(candidate_movie_ids):
+                movie_idx = self.movie_id_to_index.get(movie_id)
+                if movie_idx is not None:
+                    scores[idx] = similarities[movie_idx]
+            return scores
+        
+        except Exception as e:
+            logger.error(f"Error scoring candidates: {str(e)}")
+            return np.zeros(len(candidate_movie_ids))
 
 
 class UserBehaviorModel:
@@ -375,9 +510,14 @@ class UserBehaviorModel:
         self.scaler = StandardScaler()
         self.feature_names = None
         self.feature_importance = None
+        self.user_stats = None
+        self.movie_stats = None
+        self.movie_metadata = None
+        self.global_avg_rating = None
+        self.global_release_year = None
         logger.info("UserBehaviorModel initialized")
     
-    def engineer_features(self, merged_data):
+    def engineer_features(self, merged_data, movie_metadata):
         """
         Engineer features for user behavior prediction.
         
@@ -388,13 +528,20 @@ class UserBehaviorModel:
         4. movie_avg_rating: Average rating received by movie
         5. movie_num_ratings: Count of ratings for movie
         6. relevance_score: Genome relevance score
-        7. user_novelty_score: How new movies are compared to user's watch history
+        7. release_year: Movie release year (normalized)
+        8. genre_count: Number of genres
         """
         try:
             logger.info("Engineering features for user behavior...")
             
             # Create copy to avoid warnings
             data = merged_data.copy()
+            metadata = movie_metadata.copy()
+            metadata['genre_count'] = metadata['genres'].fillna('').apply(
+                lambda genres: len(genres.split('|')) if genres else 0
+            )
+            self.global_release_year = metadata['release_year'].median()
+            metadata['release_year'] = metadata['release_year'].fillna(self.global_release_year)
             
             # User-level aggregations
             user_stats = data.groupby('userId').agg({
@@ -409,15 +556,27 @@ class UserBehaviorModel:
             }).reset_index()
             movie_stats.columns = ['movieId', 'movie_avg_rating', 'movie_num_ratings']
             
+            self.user_stats = user_stats.set_index('userId')
+            self.movie_stats = movie_stats.set_index('movieId')
+            self.movie_metadata = metadata.set_index('movieId')
+            self.global_avg_rating = data['rating'].mean()
+            
             # Merge features
             features = data.merge(user_stats, on='userId', how='left')
             features = features.merge(movie_stats, on='movieId', how='left')
+            features = features.merge(
+                metadata[['movieId', 'avg_relevance_score', 'release_year', 'genre_count']],
+                on='movieId',
+                how='left'
+            )
             
             # Handle missing values
             features['user_rating_std'].fillna(0, inplace=True)
-            features['movie_avg_rating'].fillna(features['rating'].mean(), inplace=True)
+            features['movie_avg_rating'].fillna(self.global_avg_rating, inplace=True)
             features['movie_num_ratings'].fillna(1, inplace=True)
             features['avg_relevance_score'].fillna(0.5, inplace=True)
+            features['release_year'].fillna(self.global_release_year, inplace=True)
+            features['genre_count'].fillna(0, inplace=True)
             
             # Additional features
             features['rating_diff'] = features['rating'] - features['movie_avg_rating']
@@ -429,7 +588,8 @@ class UserBehaviorModel:
             self.feature_names = [
                 'user_rating_mean', 'user_rating_std', 'user_num_ratings',
                 'movie_avg_rating', 'movie_num_ratings', 'avg_relevance_score',
-                'rating_diff', 'user_movie_interaction', 'user_rating_mean_norm'
+                'release_year', 'genre_count', 'rating_diff',
+                'user_movie_interaction', 'user_rating_mean_norm'
             ]
             
             logger.info(f"Created {len(self.feature_names)} features: {self.feature_names}")
@@ -495,6 +655,45 @@ class UserBehaviorModel:
         except Exception as e:
             logger.error(f"Error in prediction: {str(e)}")
             return np.zeros(len(features_data))
+
+    def predict_for_user(self, user_id: int, candidate_movie_ids: List[int]) -> np.ndarray:
+        """Predict preference scores for a user over candidate movies"""
+        try:
+            if self.user_stats is None or self.movie_stats is None or self.movie_metadata is None:
+                return np.zeros(len(candidate_movie_ids))
+
+            if user_id in self.user_stats.index:
+                user_row = self.user_stats.loc[user_id]
+            else:
+                user_row = pd.Series({
+                    'user_rating_mean': self.global_avg_rating,
+                    'user_rating_std': 0,
+                    'user_num_ratings': 0
+                })
+
+            movie_stats = self.movie_stats.reindex(candidate_movie_ids)
+            metadata = self.movie_metadata.reindex(candidate_movie_ids)
+
+            features = pd.DataFrame(index=candidate_movie_ids)
+            features['user_rating_mean'] = user_row['user_rating_mean']
+            features['user_rating_std'] = user_row['user_rating_std']
+            features['user_num_ratings'] = user_row['user_num_ratings']
+            features['movie_avg_rating'] = movie_stats['movie_avg_rating'].fillna(self.global_avg_rating)
+            features['movie_num_ratings'] = movie_stats['movie_num_ratings'].fillna(1)
+            features['avg_relevance_score'] = metadata['avg_relevance_score'].fillna(0.5)
+            features['release_year'] = metadata['release_year'].fillna(self.global_release_year)
+            features['genre_count'] = metadata['genre_count'].fillna(0)
+            features['rating_diff'] = features['user_rating_mean'] - features['movie_avg_rating']
+            features['user_movie_interaction'] = features['user_rating_mean'] * features['movie_avg_rating']
+            features['user_rating_mean_norm'] = features['user_rating_mean'] / 5.0
+
+            X_scaled = self.scaler.transform(features[self.feature_names].values)
+            predictions = self.model.predict(X_scaled)
+            return np.clip(predictions, 0, 5)
+
+        except Exception as e:
+            logger.error(f"Error in predict_for_user: {str(e)}")
+            return np.zeros(len(candidate_movie_ids))
 
 
 class HybridRecommendationSystem:
@@ -568,7 +767,7 @@ class HybridRecommendationSystem:
             
             # Step 5: Train User Behavior Model
             logger.info("\n[Step 5] Training User Behavior model...")
-            features_data = self.ub_model.engineer_features(self.merged_data)
+            features_data = self.ub_model.engineer_features(self.merged_data, self.unique_movies)
             self.ub_model.fit(features_data)
             
             logger.info("\n" + "="*60)
@@ -608,88 +807,65 @@ class HybridRecommendationSystem:
             
             # Get user's watch history
             user_ratings = self.merged_data[self.merged_data['userId'] == user_id]
-            watched_movies = set(user_ratings['movieId'].unique())
+            watched_movie_ids = user_ratings['movieId'].unique().tolist()
+            watched_movies = set(watched_movie_ids)
             
             logger.info(f"User has watched {len(watched_movies)} movies")
-            logger.info(f"User's average rating: {user_ratings['rating'].mean():.2f}")
+            if len(user_ratings) > 0:
+                logger.info(f"User's average rating: {user_ratings['rating'].mean():.2f}")
             
             # Get all unrated movies
-            all_movies = set(self.unique_movies['movieId'].unique())
-            unrated_movies = all_movies - watched_movies
-            
-            logger.info(f"Generating scores for {len(unrated_movies)} unrated movies...")
-            
+            all_movie_ids = self.unique_movies['movieId'].unique().tolist()
+            candidate_movie_ids = [movie_id for movie_id in all_movie_ids if movie_id not in watched_movies]
+
+            logger.info(f"Generating scores for {len(candidate_movie_ids)} unrated movies...")
+            if not candidate_movie_ids:
+                return []
+
+            # 1. Collaborative Filtering scores
+            cf_scores = self.cf_model.predict_scores_for_user(user_id, candidate_movie_ids)
+
+            # 2. Content-Based scores
+            if current_movie_id and current_movie_id in self.cb_model.movie_id_to_index:
+                profile_vector = self.cb_model.movie_features[self.cb_model.movie_id_to_index[current_movie_id]]
+            else:
+                profile_vector = self.cb_model.build_user_profile(
+                    watched_movie_ids, user_ratings['rating'].tolist()
+                )
+            cb_scores = self.cb_model.score_candidates(profile_vector, candidate_movie_ids) * 5
+
+            # 3. User Behavior scores
+            ub_scores = self.ub_model.predict_for_user(user_id, candidate_movie_ids)
+
+            # Hybrid score (weighted combination)
+            hybrid_scores = (
+                self.cf_weight * cf_scores +
+                self.cb_weight * cb_scores +
+                self.ub_weight * ub_scores
+            )
+
+            candidate_info = self.unique_movies.set_index('movieId').reindex(candidate_movie_ids)
+            top_indices = np.argsort(hybrid_scores)[::-1][:num_recommendations]
+
             recommendations = []
-            
-            for movie_id in unrated_movies:
-                try:
-                    # 1. Collaborative Filtering Score
-                    cf_score = self.cf_model.predict_score(user_id, movie_id)
-                    
-                    # 2. Content-Based Score
-                    cb_score = 0
-                    if current_movie_id and current_movie_id in self.cf_model.movie_ids:
-                        similar_movies = self.cb_model.find_similar_movies(
-                            current_movie_id, top_k=1000
-                        )
-                        for sim_movie_id, sim_score in similar_movies:
-                            if sim_movie_id == movie_id:
-                                cb_score = sim_score * 5  # Scale to 0-5
-                                break
-                    else:
-                        # If no current movie, use average similarity to watch history
-                        if watched_movies:
-                            scores = []
-                            for watched_id in list(watched_movies)[:20]:  # Limit for efficiency
-                                similar = self.cb_model.find_similar_movies(watched_id, top_k=100)
-                                for sim_id, sim_score in similar:
-                                    if sim_id == movie_id:
-                                        scores.append(sim_score)
-                            if scores:
-                                cb_score = np.mean(scores) * 5
-                    
-                    # 3. User Behavior Score
-                    ub_features = self.ub_model.engineer_features(
-                        self.merged_data[self.merged_data['movieId'] == movie_id]
-                    )
-                    if len(ub_features) > 0:
-                        ub_score = self.ub_model.predict(ub_features)[0]
-                    else:
-                        ub_score = user_ratings['rating'].mean()
-                    
-                    # Hybrid score (weighted combination)
-                    hybrid_score = (
-                        self.cf_weight * cf_score +
-                        self.cb_weight * cb_score +
-                        self.ub_weight * ub_score
-                    )
-                    
-                    # Get movie info
-                    movie_info = self.unique_movies[
-                        self.unique_movies['movieId'] == movie_id
-                    ]
-                    
-                    if len(movie_info) > 0:
-                        movie_row = movie_info.iloc[0]
-                        recommendations.append({
-                            'movieId': int(movie_id),
-                            'title': movie_row['title'],
-                            'genres': movie_row['genres'],
-                            'tags': movie_row['tag_list'],
-                            'hybrid_score': float(hybrid_score),
-                            'cf_score': float(cf_score),
-                            'cb_score': float(cb_score),
-                            'ub_score': float(ub_score),
-                            'avg_relevance_score': float(movie_row['avg_relevance_score'])
-                        })
-                
-                except Exception as e:
-                    logger.debug(f"Error scoring movie {movie_id}: {str(e)}")
+            for idx in top_indices:
+                movie_id = candidate_movie_ids[idx]
+                movie_row = candidate_info.loc[movie_id]
+                if movie_row is None or movie_row.isna().all():
                     continue
-            
-            # Sort by hybrid score and return top-k
-            recommendations.sort(key=lambda x: x['hybrid_score'], reverse=True)
-            recommendations = recommendations[:num_recommendations]
+                release_year = movie_row['release_year']
+                recommendations.append({
+                    'movieId': int(movie_id),
+                    'title': movie_row['title'],
+                    'release_year': int(release_year) if not pd.isna(release_year) else None,
+                    'genres': movie_row['genres'],
+                    'tags': movie_row['tag_list'],
+                    'hybrid_score': float(hybrid_scores[idx]),
+                    'cf_score': float(cf_scores[idx]),
+                    'cb_score': float(cb_scores[idx]),
+                    'ub_score': float(ub_scores[idx]),
+                    'avg_relevance_score': float(movie_row['avg_relevance_score'])
+                })
             
             logger.info(f"Generated {len(recommendations)} recommendations")
             
