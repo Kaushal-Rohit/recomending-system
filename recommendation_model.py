@@ -456,7 +456,7 @@ class ContentBasedModel:
             
             weights = np.array(weights, dtype=float)
             weights = weights / weights.sum()
-            weights_matrix = csr_matrix(weights)
+            weights_matrix = csr_matrix(weights.reshape(1, -1))
             profile = weights_matrix.dot(self.movie_features[indices])
             return profile
         
@@ -773,7 +773,10 @@ class HybridRecommendationSystem:
             
             # Step 5: Train User Behavior Model
             logger.info("\n[Step 5] Training User Behavior model...")
-            features_data = self.ub_model.engineer_features(self.merged_data, self.unique_movies)
+            features_data = self.ub_model.engineer_features(
+                self.merged_data,
+                self.preprocessor.movie_metadata
+            )
             self.ub_model.fit(features_data)
             
             logger.info("\n" + "="*60)
@@ -860,7 +863,7 @@ class HybridRecommendationSystem:
             for idx in top_indices:
                 movie_id = candidate_movie_ids[idx]
                 movie_row = candidate_info.loc[movie_id]
-                if movie_row is None or movie_row.isna().all():
+                if movie_row.isna().all():
                     continue
                 release_year = movie_row['release_year']
                 recommendations.append({
