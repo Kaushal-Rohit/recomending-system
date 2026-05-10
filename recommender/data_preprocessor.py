@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, MultiLabelBinarizer
 
 from .logging_config import get_logger
 
@@ -113,26 +113,18 @@ class DataPreprocessor:
                 ['movieId', 'title', 'genres', 'tag_list', 'avg_relevance_score']
             ].drop_duplicates()
 
-            # Extract all unique tags
-            all_tags = set()
-            for tags_list in unique_movies['tag_list']:
-                if isinstance(tags_list, list):
-                    all_tags.update(tags_list)
-
-            logger.info(f"Total unique tags: {len(all_tags)}")
+            tag_lists = unique_movies['tag_list'].apply(
+                lambda tags: tags if isinstance(tags, list) else []
+            )
+            unique_movies = unique_movies.copy()
+            unique_movies['tag_list'] = tag_lists
 
             # Create tag feature matrix
-            movie_tag_features = []
-            for _, row in unique_movies.iterrows():
-                tag_vector = np.zeros(len(all_tags))
-                tags_list = row['tag_list']
-                if isinstance(tags_list, list):
-                    for tag in tags_list:
-                        if tag in all_tags:
-                            tag_vector[list(all_tags).index(tag)] = 1
-                movie_tag_features.append(tag_vector)
+            tag_binarizer = MultiLabelBinarizer()
+            movie_tag_features = tag_binarizer.fit_transform(tag_lists)
+            all_tags = tag_binarizer.classes_.tolist()
 
-            movie_tag_features = np.array(movie_tag_features)
+            logger.info(f"Total unique tags: {len(all_tags)}")
 
             # Normalize relevance scores
             scaler = MinMaxScaler()

@@ -1,8 +1,13 @@
 import logging
 
 
+_LOGGING_CONFIGURED = False
+
+
 def setup_logging() -> None:
-    if getattr(setup_logging, "_configured", False):
+    global _LOGGING_CONFIGURED
+    if _LOGGING_CONFIGURED or logging.getLogger().handlers:
+        _LOGGING_CONFIGURED = True
         return
 
     logging.basicConfig(
@@ -13,7 +18,7 @@ def setup_logging() -> None:
             logging.StreamHandler()
         ]
     )
-    setup_logging._configured = True
+    _LOGGING_CONFIGURED = True
 
 
 def get_logger(name: str) -> logging.Logger:

@@ -29,6 +29,8 @@ class CollaborativeFilteringModel:
         self.user_factors = None
         self.item_factors = None
         self.movie_ids = None
+        self.user_ids = None
+        self.user_id_to_index = None
         logger.info(f"CollaborativeFilteringModel initialized with {n_factors} factors")
 
     def create_interaction_matrix(self, ratings_df):
@@ -45,6 +47,9 @@ class CollaborativeFilteringModel:
                 values='rating',
                 fill_value=0
             )
+
+            self.user_ids = interaction_matrix.index.tolist()
+            self.user_id_to_index = {user_id: idx for idx, user_id in enumerate(self.user_ids)}
 
             logger.info(f"Interaction matrix shape: {interaction_matrix.shape}")
             return interaction_matrix
@@ -85,9 +90,13 @@ class CollaborativeFilteringModel:
 
             movie_idx = self.movie_ids.index(movie_id)
 
+            user_index = None
+            if self.user_id_to_index:
+                user_index = self.user_id_to_index.get(user_id)
+
             # Find user factor (handle new users)
-            if user_id <= len(self.user_factors):
-                user_factor = self.user_factors[user_id - 1]
+            if user_index is not None:
+                user_factor = self.user_factors[user_index]
             else:
                 user_factor = np.zeros(self.n_factors)
 
