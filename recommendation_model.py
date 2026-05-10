@@ -35,6 +35,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+TAG_MIN_DF = 2
+GENOME_SVD_COMPONENTS = 64
+MIN_PROFILE_WEIGHT = 0.1
+SIMILARITY_SCORE_SCALE = 5.0
+
 
 class DataPreprocessor:
     """
@@ -182,7 +187,7 @@ class DataPreprocessor:
                 self.tag_vectorizer = None
                 tags_list = []
             else:
-                self.tag_vectorizer = TfidfVectorizer(min_df=2, max_features=5000)
+                self.tag_vectorizer = TfidfVectorizer(min_df=TAG_MIN_DF, max_features=5000)
                 tag_features = self.tag_vectorizer.fit_transform(tag_corpus)
                 tags_list = self.tag_vectorizer.get_feature_names_out().tolist()
             
@@ -213,7 +218,7 @@ class DataPreprocessor:
                     )
                     
                     if genome_matrix.shape[1] >= 2:
-                        n_components = min(64, genome_matrix.shape[1] - 1)
+                        n_components = min(GENOME_SVD_COMPONENTS, genome_matrix.shape[1] - 1)
                         self.genome_svd = TruncatedSVD(
                             n_components=n_components,
                             random_state=42
@@ -444,14 +449,15 @@ class ContentBasedModel:
                 movie_idx = self.movie_id_to_index.get(movie_id)
                 if movie_idx is not None:
                     indices.append(movie_idx)
-                    weights.append(max(rating, 0.1))
+                    weights.append(max(rating, MIN_PROFILE_WEIGHT))
             
             if not indices:
                 return None
             
             weights = np.array(weights, dtype=float)
             weights = weights / weights.sum()
-            profile = self.movie_features[indices].multiply(weights[:, None]).sum(axis=0)
+            weights_matrix = csr_matrix(weights)
+            profile = weights_matrix.dot(self.movie_features[indices])
             return profile
         
         except Exception as e:
@@ -832,7 +838,10 @@ class HybridRecommendationSystem:
                 profile_vector = self.cb_model.build_user_profile(
                     watched_movie_ids, user_ratings['rating'].tolist()
                 )
-            cb_scores = self.cb_model.score_candidates(profile_vector, candidate_movie_ids) * 5
+            cb_scores = (
+                self.cb_model.score_candidates(profile_vector, candidate_movie_ids)
+                * SIMILARITY_SCORE_SCALE
+            )
 
             # 3. User Behavior scores
             ub_scores = self.ub_model.predict_for_user(user_id, candidate_movie_ids)
