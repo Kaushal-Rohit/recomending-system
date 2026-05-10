@@ -90,6 +90,9 @@ class DataPreprocessor:
             # Fill missing values
             self.merged_data['avg_relevance_score'] = self.merged_data['avg_relevance_score'].fillna(0.5)
             self.merged_data['tag_list'] = self.merged_data['tag_list'].fillna('')
+            self.merged_data['tag_list'] = self.merged_data['tag_list'].apply(
+                lambda tags: tags if isinstance(tags, list) else []
+            )
 
             logger.info(f"Merged dataset shape: {self.merged_data.shape}")
             logger.info(f"Columns: {self.merged_data.columns.tolist()}")
@@ -113,9 +116,6 @@ class DataPreprocessor:
                 ['movieId', 'title', 'genres', 'tag_list', 'avg_relevance_score']
             ].drop_duplicates()
 
-            unique_movies['tag_list'] = unique_movies['tag_list'].apply(
-                lambda tags: tags if isinstance(tags, list) else []
-            )
             tag_lists = unique_movies['tag_list']
 
             # Create tag feature matrix
