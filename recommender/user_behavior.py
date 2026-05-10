@@ -68,7 +68,7 @@ class UserBehaviorModel:
                 'rating': ['mean', 'std', 'count']
             }).reset_index()
             user_stats.columns = ['userId', 'user_rating_mean', 'user_rating_std', 'user_num_ratings']
-            user_stats['user_rating_std'].fillna(0, inplace=True)
+            user_stats['user_rating_std'] = user_stats['user_rating_std'].fillna(0)
 
             # Movie-level aggregations
             movie_stats = data.groupby('movieId').agg({

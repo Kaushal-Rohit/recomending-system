@@ -113,7 +113,6 @@ class DataPreprocessor:
                 ['movieId', 'title', 'genres', 'tag_list', 'avg_relevance_score']
             ].drop_duplicates()
 
-            unique_movies = unique_movies.copy()
             unique_movies['tag_list'] = unique_movies['tag_list'].apply(
                 lambda tags: tags if isinstance(tags, list) else []
             )
