@@ -54,7 +54,7 @@ class HybridRecommendationSystem:
 
             # Step 1: Load and preprocess data
             logger.info("\n[Step 1] Loading and preprocessing data...")
-            self.preprocessor.data_dir = data_dir
+            self.preprocessor = DataPreprocessor(data_dir=data_dir)
             self.preprocessor.load_data()
             self.merged_data = self.preprocessor.merge_data()
 
