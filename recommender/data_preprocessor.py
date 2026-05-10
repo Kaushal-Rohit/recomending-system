@@ -89,7 +89,6 @@ class DataPreprocessor:
 
             # Fill missing values
             self.merged_data['avg_relevance_score'] = self.merged_data['avg_relevance_score'].fillna(0.5)
-            self.merged_data['tag_list'] = self.merged_data['tag_list'].fillna('')
             self.merged_data['tag_list'] = self.merged_data['tag_list'].apply(
                 lambda tags: tags if isinstance(tags, list) else []
             )

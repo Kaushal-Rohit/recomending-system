@@ -100,6 +100,10 @@ class CollaborativeFilteringModel:
             if user_index is not None:
                 user_factor = self.user_factors[user_index]
             else:
+                logger.warning(
+                    "User %s not found in training data; using cold-start defaults.",
+                    user_id
+                )
                 user_factor = np.zeros(self.n_factors)
 
             # Compute dot product
