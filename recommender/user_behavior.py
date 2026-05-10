@@ -81,7 +81,6 @@ class UserBehaviorModel:
             features = features.merge(movie_stats, on='movieId', how='left')
 
             # Handle missing values
-            features['user_rating_std'].fillna(0, inplace=True)
             features['movie_avg_rating'].fillna(features['rating'].mean(), inplace=True)
             features['movie_num_ratings'].fillna(1, inplace=True)
             features['avg_relevance_score'].fillna(0.5, inplace=True)

@@ -113,11 +113,11 @@ class DataPreprocessor:
                 ['movieId', 'title', 'genres', 'tag_list', 'avg_relevance_score']
             ].drop_duplicates()
 
-            tag_lists = unique_movies['tag_list'].apply(
+            unique_movies = unique_movies.copy()
+            unique_movies['tag_list'] = unique_movies['tag_list'].apply(
                 lambda tags: tags if isinstance(tags, list) else []
             )
-            unique_movies = unique_movies.copy()
-            unique_movies['tag_list'] = tag_lists
+            tag_lists = unique_movies['tag_list']
 
             # Create tag feature matrix
             tag_binarizer = MultiLabelBinarizer()

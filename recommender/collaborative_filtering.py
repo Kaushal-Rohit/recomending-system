@@ -90,9 +90,7 @@ class CollaborativeFilteringModel:
 
             movie_idx = self.movie_ids.index(movie_id)
 
-            user_index = None
-            if self.user_id_to_index:
-                user_index = self.user_id_to_index.get(user_id)
+            user_index = self.user_id_to_index.get(user_id) if self.user_id_to_index else None
 
             # Find user factor (handle new users)
             if user_index is not None:
